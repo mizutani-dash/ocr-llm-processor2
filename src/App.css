@@ -1,0 +1,45 @@
+.App {
+  min-height: 100vh;
+  background-color: #f5f8fa;
+}
+
+.card {
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  border: none;
+  margin-bottom: 1.5rem;
+}
+
+.card-header {
+  background-color: #f8f9fa;
+  border-bottom: 1px solid #eaedf0;
+  font-weight: 600;
+}
+
+pre {
+  background-color: #f8f9fa;
+  padding: 10px;
+  border-radius: 4px;
+}
+
+.pdf-preview {
+  background-color: #f1f1f1;
+  border: 1px dashed #ccc;
+  border-radius: 5px;
+  padding: 30px;
+  text-align: center;
+  color: #666;
+  font-weight: bold;
+}
+
+/* Style for the form controls */
+.form-control:focus {
+  border-color: #80bdff;
+  box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+/* Style for spinners */
+.spinner-border {
+  width: 3rem;
+  height: 3rem;
+  color: #3f7fbf;
+}
