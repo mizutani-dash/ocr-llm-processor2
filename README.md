@@ -1,6 +1,6 @@
 # 問診票 OCR & LLM 処理アプリケーション
 
-問診票をスキャンしてOCR処理を行い、その結果をローカルLLM（Gemma等）で処理して電子カルテに入力しやすい形に整形するウェブアプリケーションです。
+問診票をスキャンしてOCR処理を行い、その結果をAzure OpenAIで処理して電子カルテに入力しやすい形に整形するウェブアプリケーションです。
 
 ## 機能概要
 
@@ -14,12 +14,12 @@
 ## 必要要件
 
 - Azure Document Intelligence のアカウント（APIキーとエンドポイント）
-- ローカルで動作するLLMサーバー（Ollama, LM Studio等）
+- Azure OpenAI Service のアカウント（APIキー、エンドポイント、デプロイメント名）
 
 ## 使い方
 
-1. Azure設定セクションにAPIキーとエンドポイントを入力
-2. ローカルLLM設定セクションにエンドポイントとモデル名を入力
+1. Azure Document Intelligence設定セクションにAPIキーとエンドポイントを入力
+2. Azure OpenAI設定セクションにエンドポイント、APIキー、デプロイメント名を入力
 3. 必要に応じてLLMプロンプトテンプレートをカスタマイズ
 4. 問診票ファイル（JPEGまたはPDF）をアップロード
 5. OCR処理開始ボタンをクリック
@@ -39,16 +39,41 @@ npm install
 npm run dev
 ```
 
-## Renderへのデプロイ方法
+## GitHubへのアップロード手順
 
-1. GitHubにリポジトリをアップロード
-2. Renderダッシュボードで「New Web Service」を選択
-3. GitHubリポジトリを接続
-4. 以下の設定でデプロイ
-   - **Environment**: Node
-   - **Build Command**: `npm install && npm run build`
-   - **Start Command**: `npm start`
-   - **Node Version**: 18 以上
+1. GitHubでリポジトリを作成
+2. ローカルリポジトリを初期化して接続
+
+```bash
+cd ocr-llm-processor
+git init
+git add .
+git commit -m "Initial commit"
+git branch -M main
+git remote add origin https://github.com/あなたのユーザー名/ocr-llm-processor.git
+git push -u origin main
+```
+
+## Renderへのデプロイ手順
+
+1. [Render.com](https://render.com/)にサインアップ/ログイン
+2. ダッシュボードから「New +」→「Web Service」を選択
+3. 「Connect a repository」セクションでGitHubアカウントを連携
+4. 先ほど作成したリポジトリを選択
+5. 以下の設定を入力:
+   - Name: `ocr-llm-processor`（任意）
+   - Runtime: `Node`
+   - Build Command: `npm install && npm run build`
+   - Start Command: `npm start`
+6. 「Create Web Service」をクリック
+
+デプロイが完了すると、提供されたURLでアプリケーションにアクセスできます。
+
+### 注意点
+
+- 本番環境での使用時は、APIキーを環境変数として設定することをお勧めします
+- Renderダッシュボードの「Environment」タブから以下の環境変数を設定できます:
+  - `NODE_ENV=production`
 
 ## 利用技術
 

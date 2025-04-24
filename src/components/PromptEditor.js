@@ -14,10 +14,10 @@ const PromptEditor = ({ prompt, onPromptChange, disabled }) => {
             value={prompt}
             onChange={(e) => onPromptChange(e.target.value)}
             disabled={disabled}
-            placeholder="ここにLLMへのプロンプトを入力してください。OCRの結果は {{OCR_RESULT}} として参照できます。"
+            placeholder="ここにLLMへのプロンプトを入力してください。OCRの結果は {'{{OCR_RESULT}}'} として参照できます。"
           />
           <Form.Text className="text-muted">
-            プロンプト内で {{OCR_RESULT}} と記載された部分はOCR結果に置き換えられます。
+            プロンプト内で {'{{OCR_RESULT}}'} と記載された部分はOCR結果に置き換えられます。
             Local LLMに問診票データの整形方法を指示するプロンプトを記述してください。
           </Form.Text>
         </Form.Group>

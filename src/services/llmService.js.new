@@ -24,16 +24,7 @@ export const processWithAzureOpenAI = async (ocrText, prompt, config) => {
   }
 
   // Replace placeholder in the prompt with actual OCR text
-  // OCRテキストを制限してトークン数を削減する
-  const MAX_OCR_LENGTH = 3000; // 最大文字数を制限
-  let limitedOcrText = ocrText;
-  
-  if (ocrText.length > MAX_OCR_LENGTH) {
-    console.log(`OCRテキストが長すぎるため制限します: ${ocrText.length} -> ${MAX_OCR_LENGTH} 文字`);
-    limitedOcrText = ocrText.substring(0, MAX_OCR_LENGTH) + "\n... [テキストが長すぎるため制限されました]"; 
-  }
-  
-  const fullPrompt = prompt.replace('{{OCR_RESULT}}', limitedOcrText);
+  const fullPrompt = prompt.replace('{{OCR_RESULT}}', ocrText);
 
   try {
     // Azure OpenAI APIのリクエスト形式
@@ -41,15 +32,15 @@ export const processWithAzureOpenAI = async (ocrText, prompt, config) => {
       messages: [
         {
           role: 'system',
-          content: '問診票を構造化して名前、症状、既往歴を表形式で整理。簡潔に。'
+          content: '問診票の内容を整理して構造化してください。段落を適切に分け、重要な医療情報を見やすく整形してください。'
         },
         {
           role: 'user',
           content: fullPrompt
         }
       ],
-      temperature: 0.0, // 最も決定的な応答にしてトークンを節約
-      max_tokens: 300,  // さらにトークン数を削減
+      temperature: 0.2, // より正確な回答のために低めの温度設定
+      max_tokens: 2000,  // 十分な長さの回答を得るため
       top_p: 0.95,
       frequency_penalty: 0,
       presence_penalty: 0
@@ -59,8 +50,8 @@ export const processWithAzureOpenAI = async (ocrText, prompt, config) => {
 
     // Azure OpenAIへのリクエストエンドポイント設定
     // 複数のAPI仕様・バージョンに対応
-    // Pythonコードで動作している最新バージョンを使用
-    const apiVersion = '2024-02-01'; // Pythonコードで動作している値に更新
+    const apiVersions = ['2023-12-01-preview', '2023-05-15', '2022-12-01'];
+    const apiVersion = apiVersions[0]; // 最新版をデフォルトとして使用
     
     // エンドポイントの正規化
     let baseEndpoint = config.endpoint.trim();
@@ -71,57 +62,60 @@ export const processWithAzureOpenAI = async (ocrText, prompt, config) => {
     // 末尾のスラッシュを削除
     baseEndpoint = baseEndpoint.endsWith('/') ? baseEndpoint.slice(0, -1) : baseEndpoint;
     
-    // エンドポイントを構築
-    const endpoint = `${baseEndpoint}/openai/deployments/${config.deploymentName}/chat/completions?api-version=${apiVersion}`;
+    // 複数の可能なエンドポイント形式を定義
+    const possibleEndpoints = [
+      // 標準形式
+      `${baseEndpoint}/openai/deployments/${config.deploymentName}/chat/completions?api-version=${apiVersion}`,
+      // 旧形式
+      `${baseEndpoint}/deployments/${config.deploymentName}/chat/completions?api-version=${apiVersion}`,
+      // 地域固有形式
+      `${baseEndpoint}/openai/chat/completions?api-version=${apiVersion}&deployment=${config.deploymentName}`
+    ];
     
-    console.log('使用するエンドポイント:', endpoint);
+    console.log('試行する可能性のあるエンドポイント形式:', possibleEndpoints);
     
-    // APIリクエストを送信
-    console.log('リクエストを送信中...');
+    let response = null;
+    let lastError = null;
     
-    try {
-      let retryCount = 0;
-      const maxRetries = 2; // 最大再試行回数を増やす
-      let response = null;
+    // 順番に全てのエンドポイント形式を試行
+    for (let i = 0; i < possibleEndpoints.length; i++) {
+      const currentEndpoint = possibleEndpoints[i];
+      console.log(`エンドポイント形式 ${i+1}/${possibleEndpoints.length} を試行中:`, currentEndpoint);
       
-      while (retryCount <= maxRetries) {
-        try {
-          response = await axios.post(endpoint, requestData, {
-            headers: {
-              'Content-Type': 'application/json',
-              'api-key': config.apiKey,
-              'Accept': 'application/json'
-            },
-            timeout: 30000 // タイムアウトを増やす
-          });
-          
-          console.log('API呼び出しに成功しました');
-          break; // 成功したらループを抜ける
-        } catch (err) {
-          // 429エラー（レート制限）の場合は再試行
-          if (err.response && err.response.status === 429 && retryCount < maxRetries) {
-            retryCount++;
-            console.log(`レート制限エラーです。${retryCount}回目の再試行まで 90 秒間待機します...`);
-            await new Promise(resolve => setTimeout(resolve, 90000)); // 90秒待機に延長
-            continue;
-          }
-          // それ以外のエラーはスロー
-          throw err;
-        }
+      try {
+        const resp = await axios.post(currentEndpoint, requestData, {
+          headers: {
+            'Content-Type': 'application/json',
+            'api-key': config.apiKey,
+            'Accept': 'application/json',
+            'Ocp-Apim-Subscription-Key': config.apiKey // 一部の地域で必要
+          },
+          timeout: 20000 // タイムアウトを増やす
+        });
+        
+        console.log(`エンドポイント形式 ${i+1} で成功!`);
+        response = resp;
+        break; // 成功したらループを抜ける
+      } catch (error) {
+        console.log(`エンドポイント形式 ${i+1} で失敗:`, error.message);
+        lastError = error;
+        // エラーが発生しても次のエンドポイントを試す
       }
-      
-      if (response && response.data.choices && response.data.choices.length > 0) {
-        return response.data.choices[0].message.content;
-      } else {
-        console.error('予期しない応答フォーマット:', response ? response.data : '応答なし');
-        throw new Error('予期しないAzure OpenAI応答フォーマット');
-      }
-    } catch (error) {
-      console.error('Azure OpenAI APIに接続できませんでした:', error);
-      throw error;
     }
     
-    // 成功レスポンスの処理は上記tryブロック内で完了している
+    // 全てのエンドポイントが失敗した場合
+    if (!response) {
+      console.error('全てのエンドポイント形式で接続に失敗しました');
+      throw lastError || new Error('Azure OpenAIへの接続に失敗しました');
+    }
+    
+    // 成功レスポンスの処理
+    if (response.data && response.data.choices && response.data.choices.length > 0) {
+      return response.data.choices[0].message.content;
+    } else {
+      console.error('Unexpected Azure OpenAI response format:', response.data);
+      throw new Error('予期しないAzure OpenAI応答フォーマット');
+    }
   } catch (error) {
     console.error('Azure OpenAI API error:', error);
     
@@ -210,7 +204,7 @@ export const testAzureOpenAIConnection = async (config) => {
           content: '簡単なテストです。「接続成功」と返してください。'
         }
       ],
-      max_tokens: 20,
+      max_tokens: 50,
       temperature: 0.0
     };
 
@@ -218,8 +212,8 @@ export const testAzureOpenAIConnection = async (config) => {
 
     // Azure OpenAIへのリクエストエンドポイント設定
     // 複数のAPI仕様・バージョンに対応
-    // Pythonコードで動作している最新バージョンを使用
-    const apiVersion = '2024-02-01'; // Pythonコードで動作している値に更新
+    const apiVersions = ['2023-12-01-preview', '2023-05-15', '2022-12-01'];
+    const apiVersion = apiVersions[0]; // 最新版をデフォルトとして使用
     
     // エンドポイントの正規化
     let baseEndpoint = config.endpoint.trim();
@@ -230,36 +224,52 @@ export const testAzureOpenAIConnection = async (config) => {
     // 末尾のスラッシュを削除
     baseEndpoint = baseEndpoint.endsWith('/') ? baseEndpoint.slice(0, -1) : baseEndpoint;
     
-    // APIリクエストを送信
-    console.log('テストリクエストを送信中...');
+    // 複数の可能なエンドポイント形式を定義
+    const possibleEndpoints = [
+      // 標準形式
+      `${baseEndpoint}/openai/deployments/${config.deploymentName}/chat/completions?api-version=${apiVersion}`,
+      // 旧形式
+      `${baseEndpoint}/deployments/${config.deploymentName}/chat/completions?api-version=${apiVersion}`,
+      // 地域固有形式
+      `${baseEndpoint}/openai/chat/completions?api-version=${apiVersion}&deployment=${config.deploymentName}`
+    ];
     
-    // エンドポイントを構築
-    const endpoint = `${baseEndpoint}/openai/deployments/${config.deploymentName}/chat/completions?api-version=${apiVersion}`;
-    console.log('使用するエンドポイント:', endpoint);
+    console.log('試行する可能性のあるエンドポイント形式:', possibleEndpoints);
     
-    try {
-      const response = await axios.post(endpoint, requestData, {
-        headers: {
-          'Content-Type': 'application/json',
-          'api-key': config.apiKey,
-          'Accept': 'application/json'
-        },
-        timeout: 10000 // 10秒のタイムアウト
-      });
+    // 順番に全てのエンドポイント形式を試行
+    for (let i = 0; i < possibleEndpoints.length; i++) {
+      const currentEndpoint = possibleEndpoints[i];
+      console.log(`エンドポイント形式 ${i+1}/${possibleEndpoints.length} を試行中:`, currentEndpoint);
       
-      console.log('Azure OpenAI接続テスト成功:', response.data);
-      return true;
-    } catch (error) {
-      console.error('Azure OpenAI接続テスト失敗:', error.message);
-      
-      if (error.response) {
-        console.error('レスポンスステータス:', error.response.status);
-        console.error('レスポンスデータ:', error.response.data);
+      try {
+        const response = await axios.post(currentEndpoint, requestData, {
+          headers: {
+            'Content-Type': 'application/json',
+            'api-key': config.apiKey,
+            'Accept': 'application/json',
+            'Ocp-Apim-Subscription-Key': config.apiKey // 一部の地域で必要
+          },
+          timeout: 20000 // タイムアウトを増やす
+        });
+        
+        console.log(`エンドポイント形式 ${i+1} でのテスト成功!`, response.data);
+        return true; // 成功したらtrueを返す
+      } catch (error) {
+        console.log(`エンドポイント形式 ${i+1} でのテスト失敗:`, error.message);
+        
+        // 詳細なエラー情報をログ出力
+        if (error.response) {
+          console.error(`エンドポイント ${i+1} 応答ステータス:`, error.response.status);
+          console.error(`エンドポイント ${i+1} 応答データ:`, error.response.data);
+        }
+        
+        // エラーが発生しても次のエンドポイントを試す
       }
-      
-      return false;
     }
-    // ここに到達することは通常ないはず
+    
+    // 全てのエンドポイントが失敗した場合
+    console.error('全てのエンドポイント形式でテスト接続に失敗しました');
+    return false;
   } catch (error) {
     console.error('Azure OpenAI connection test error:', error);
     if (error.response) {

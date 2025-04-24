@@ -1,0 +1,318 @@
+import axios from 'axios';
+
+/**
+ * Test the connection to Azure Document Intelligence and validate the custom model ID if provided
+ * @param {Object} config - Azure configuration object
+ * @param {string} config.endpoint - The Azure endpoint
+ * @param {string} config.apiKey - The Azure API key
+ * @param {string} config.modelId - Optional custom model ID
+ * @returns {Promise<Object>} - The test result
+ */
+export const testAzureConnection = async (config) => {
+  if (!config.endpoint || !config.apiKey) {
+    throw new Error('Azure APIの設定が不完全です。エンドポイントとAPIキーを入力してください。');
+  }
+
+  try {
+    // Remove trailing slash from endpoint if present
+    const endpoint = config.endpoint.endsWith('/') 
+      ? config.endpoint.slice(0, -1) 
+      : config.endpoint;
+      
+    // Try both possible API endpoint paths
+    let baseUrl = `${endpoint}/documentintelligence/documentModels?api-version=2023-07-31`;
+    let fallbackUrl = `${endpoint}/formrecognizer/documentModels?api-version=2023-07-31`;
+    
+    console.log('Testing API connections:', { primary: baseUrl, fallback: fallbackUrl });
+    
+    let apiResponse;
+    try {
+      // Try primary URL first
+      apiResponse = await axios.get(baseUrl, {
+        headers: {
+          'Ocp-Apim-Subscription-Key': config.apiKey
+        }
+      });
+      console.log('Primary API endpoint connection successful');
+    } catch (primaryError) {
+      console.log('Primary API endpoint failed, trying fallback...', primaryError.message);
+      // Try fallback URL
+      apiResponse = await axios.get(fallbackUrl, {
+        headers: {
+          'Ocp-Apim-Subscription-Key': config.apiKey
+        }
+      });
+      console.log('Fallback API endpoint connection successful');
+      // Update baseUrl to the successful fallback for model testing
+      baseUrl = fallbackUrl;
+    }
+
+    // If a custom model ID is provided, check if it exists
+    if (config.modelId && config.modelId.trim() !== '') {
+      try {
+        // Use whichever endpoint path was successful with the base connection
+        const apiPath = baseUrl.includes('documentintelligence') ? 'documentintelligence' : 'formrecognizer';
+        const modelUrl = `${endpoint}/${apiPath}/documentModels/${config.modelId}?api-version=2023-07-31`;
+        const modelResponse = await axios.get(modelUrl, {
+          headers: {
+            'Ocp-Apim-Subscription-Key': config.apiKey
+          }
+        });
+
+        return {
+          success: true,
+          message: `接続成功しました。カスタムモデル 「${config.modelId}」 が見つかりました。`,
+          modelDetails: modelResponse.data,
+          models: apiResponse.data.models || []
+        };
+      } catch (modelError) {
+        // Model ID is invalid
+        return {
+          success: false,
+          message: `API接続は成功しましたが、指定されたカスタムモデル 「${config.modelId}」 は見つかりませんでした。`,
+          availableModels: apiResponse.data.models || [],
+          error: modelError.message
+        };
+      }
+    }
+
+    // Just return the successful connection info
+    return {
+      success: true,
+      message: '接続が成功しました。利用可能なモデルが見つかりました。',
+      models: apiResponse.data.models || []
+    };
+  } catch (error) {
+    console.error('Azure API connection test error:', error);
+    return {
+      success: false,
+      message: `Azure APIへの接続に失敗しました: ${error.message || '不明なエラー'}`,
+      error: error.message || error
+    };
+  }
+};
+
+/**
+ * Process the analysis response and poll for results
+ * @param {Object} response - The initial API response
+ * @param {string} apiKey - The Azure API key
+ * @returns {Promise<Object>} - The analysis results
+ */
+async function processAnalysisResponse(response, apiKey) {
+  // Get the operation location from the response headers
+  const operationLocation = response.headers['operation-location'];
+  if (!operationLocation) {
+    throw new Error('Azure APIから操作場所を取得できませんでした。');
+  }
+
+  console.log('Operation location:', operationLocation);
+
+  // Poll for results
+  let resultResponse;
+  let complete = false;
+  let retries = 0;
+  const maxRetries = 60; // Increased polling attempts for multi-page documents
+
+  while (!complete && retries < maxRetries) {
+    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second between polls
+    resultResponse = await axios.get(operationLocation, {
+      headers: {
+        'Ocp-Apim-Subscription-Key': apiKey
+      }
+    });
+
+    if (resultResponse.data.status === 'succeeded') {
+      complete = true;
+    } else if (resultResponse.data.status === 'failed') {
+      throw new Error(`OCR処理に失敗しました: ${resultResponse.data.error?.message || '不明なエラー'}`);
+    }
+
+    retries++;
+  }
+
+  if (!complete) {
+    throw new Error('OCR処理がタイムアウトしました。大きなファイルや複数ページのPDFであるため、時間がかかっている可能性があります。');
+  }
+
+  return resultResponse.data;
+}
+
+/**
+ * Send a document to Azure Document Intelligence for OCR processing
+ * @param {File} file - The file (PDF or image) to process
+ * @param {Object} config - Azure configuration object
+ * @param {string} config.endpoint - The Azure endpoint
+ * @param {string} config.apiKey - The Azure API key
+ * @param {string} config.modelId - Optional custom model ID
+ * @returns {Promise<Object>} - The OCR results
+ */
+export const processDocumentWithAzure = async (file, config) => {
+  if (!config.endpoint || !config.apiKey) {
+    throw new Error('Azure APIの設定が不完全です。エンドポイントとAPIキーを入力してください。');
+  }
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    // Construct the appropriate API URL based on whether a custom model is used
+    let apiUrl;
+    let additionalParams = {};
+    
+    // Add parameters to process all pages for PDFs
+    if (file.type.includes('pdf')) {
+      additionalParams.pages = '1-';
+    }
+    
+    // More detailed logging to diagnose the issue
+    console.log('Processing file:', { 
+      name: file.name, 
+      type: file.type, 
+      size: file.size,
+      endpoint: config.endpoint,
+      modelId: config.modelId || 'Using default model'
+    });
+    
+    // Remove trailing slash from endpoint if present
+    const endpoint = config.endpoint.endsWith('/') 
+      ? config.endpoint.slice(0, -1) 
+      : config.endpoint;
+      
+    if (config.modelId && config.modelId.trim() !== '') {
+      // Custom model - try both possible formats for the URL
+      // Format the URL for Document Intelligence API
+      apiUrl = `${endpoint}/documentintelligence/documentModels/${config.modelId}:analyze?api-version=2023-07-31`;
+      
+      // Fallback URL format using the older formrecognizer path
+      const fallbackUrl = `${endpoint}/formrecognizer/documentModels/${config.modelId}:analyze?api-version=2023-07-31`;
+      
+      console.log('Custom model URLs to try:', {
+        primary: apiUrl,
+        fallback: fallbackUrl
+      });
+      
+      // We'll try the primary URL first, and if it fails, we'll try the fallback URL in the catch block
+    } else {
+      // Default prebuilt model
+      apiUrl = `${endpoint}/documentintelligence/documentModels/prebuilt-layout:analyze?api-version=2023-07-31`;
+    }
+
+    console.log('Using API URL:', apiUrl);
+
+    // Add URL parameters if we have any
+    const urlWithParams = apiUrl + (Object.keys(additionalParams).length > 0 
+      ? ('&' + Object.entries(additionalParams)
+          .map(([key, value]) => `${key}=${value}`)
+          .join('&'))
+      : '');
+
+    console.log('Final API URL:', urlWithParams);
+      
+    try {
+      // First, submit the document for analysis with primary URL
+      const response = await axios.post(urlWithParams, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          'Ocp-Apim-Subscription-Key': config.apiKey
+        }
+      });
+      
+      console.log('API request succeeded with primary URL');
+      return await processAnalysisResponse(response, config.apiKey);
+    } catch (primaryError) {
+      // If using custom model and primary URL failed, try the fallback URL
+      if (config.modelId && config.modelId.trim() !== '') {
+        console.log('Primary URL failed, trying fallback URL...', primaryError.message);
+        
+        // Construct the fallback URL
+        const fallbackUrl = `${endpoint}/formrecognizer/documentModels/${config.modelId}:analyze?api-version=2023-07-31` +
+          (Object.keys(additionalParams).length > 0 
+            ? ('&' + Object.entries(additionalParams)
+                .map(([key, value]) => `${key}=${value}`)
+                .join('&'))
+            : '');
+            
+        console.log('Fallback URL:', fallbackUrl);
+        
+        try {
+          const fallbackResponse = await axios.post(fallbackUrl, formData, {
+            headers: {
+              'Content-Type': 'multipart/form-data',
+              'Ocp-Apim-Subscription-Key': config.apiKey
+            }
+          });
+          
+          console.log('API request succeeded with fallback URL');
+          return await processAnalysisResponse(fallbackResponse, config.apiKey);
+        } catch (fallbackError) {
+          // Both attempts failed, throw a combined error
+          console.error('Both primary and fallback API requests failed:', {
+            primaryError: primaryError.message,
+            fallbackError: fallbackError.message
+          });
+          throw new Error(`Azure OCR処理に失敗しました: ${fallbackError.message}`);
+        }
+      } else {
+        // Not using custom model, so just throw the original error
+        throw primaryError;
+      }
+    }
+  } catch (error) {
+    console.error('Azure API error:', error);
+    throw new Error(`Azure OCR処理中にエラーが発生しました: ${error.message || error}`);
+  }
+};
+
+/**
+ * Extract text content from Azure Document Intelligence API response
+ * @param {Object} apiResponse - The API response from Azure
+ * @returns {string} - The extracted text content
+ */
+export const extractTextFromAzureResponse = (apiResponse) => {
+  if (!apiResponse || !apiResponse.analyzeResult) {
+    return '';
+  }
+
+  const { paragraphs, tables } = apiResponse.analyzeResult;
+  let extractedText = '';
+
+  // Extract text from paragraphs
+  if (paragraphs && paragraphs.length > 0) {
+    extractedText += paragraphs.map(p => p.content).join('\n\n');
+  }
+
+  // Extract text from tables if available
+  if (tables && tables.length > 0) {
+    extractedText += '\n\n表形式データ:\n';
+    
+    tables.forEach((table, tableIndex) => {
+      extractedText += `\n表 ${tableIndex + 1}:\n`;
+      
+      // Create a 2D array to hold the table data
+      const cells = table.cells || [];
+      const tableData = [];
+      
+      // Initialize the table data structure
+      const rowCount = Math.max(...cells.map(cell => cell.rowIndex)) + 1;
+      const colCount = Math.max(...cells.map(cell => cell.columnIndex)) + 1;
+      
+      for (let i = 0; i < rowCount; i++) {
+        tableData[i] = Array(colCount).fill('');
+      }
+      
+      // Fill in the table data
+      cells.forEach(cell => {
+        if (cell.content) {
+          tableData[cell.rowIndex][cell.columnIndex] = cell.content;
+        }
+      });
+      
+      // Convert the table data to a string
+      tableData.forEach(row => {
+        extractedText += row.join(' | ') + '\n';
+      });
+    });
+  }
+
+  return extractedText;
+};

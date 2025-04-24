@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { Form, Button, Alert, Card } from 'react-bootstrap';
+import { processDocumentWithAzure } from '../services/azureService';
+import { processWithAzurePython } from '../services/azureServicePython';
 
 const FileUploader = ({ onFileUpload, isProcessing }) => {
   const [file, setFile] = useState(null);

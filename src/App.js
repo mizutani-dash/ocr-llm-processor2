@@ -12,6 +12,7 @@ import LlmConfig from './components/LlmConfig';
 
 // Services
 import { processDocumentWithAzure, extractTextFromAzureResponse } from './services/azureService';
+import { processWithAzurePython, extractTextFromResult } from './services/azureServicePython';
 import { processWithLocalLLM } from './services/llmService';
 
 function App() {
@@ -34,8 +35,9 @@ function App() {
   const [llmConfig, setLlmConfig] = useState(() => {
     const savedConfig = localStorage.getItem('llmConfig');
     return savedConfig ? JSON.parse(savedConfig) : {
-      endpoint: 'http://localhost:11434/api/generate',
-      model: 'gemma'
+      endpoint: '',
+      apiKey: '',
+      deploymentName: ''
     };
   });
 
@@ -92,9 +94,21 @@ function App() {
     setLlmResult('');
 
     try {
-      // Step 1: Process with Azure OCR
-      const azureResponse = await processDocumentWithAzure(file, azureConfig);
-      const extractedText = extractTextFromAzureResponse(azureResponse);
+      // Step 1: Process with Azure OCR (優先的にPython風実装を使用)
+      let azureResponse;
+      let extractedText;
+      
+      try {
+        console.log('Python風実装でAzure OCR処理を実行');
+        azureResponse = await processWithAzurePython(file, azureConfig);
+        extractedText = extractTextFromResult(azureResponse);
+        console.log('Python風実装での処理が成功しました');
+      } catch (pythonError) {
+        console.log('Python風実装での処理に失敗、標準実装を使用:', pythonError.message);
+        // フォールバックとして標準実装を使用
+        azureResponse = await processDocumentWithAzure(file, azureConfig);
+        extractedText = extractTextFromAzureResponse(azureResponse);
+      }
       
       setOcrResult({
         rawResponse: azureResponse,
@@ -104,10 +118,33 @@ function App() {
       // Step 2: Process with Local LLM
       if (extractedText && llmConfig.endpoint) {
         try {
+          // 詳細なデバッグログを追加
+          console.log('★ LLM処理開始: 設定値確認');
+          console.log(' - endpoint:', llmConfig.endpoint);
+          console.log(' - apiKey:', llmConfig.apiKey ? `***${llmConfig.apiKey.substr(-4)}` : 'null');
+          console.log(' - deploymentName:', llmConfig.deploymentName);
+          
+          // エンドポイント形式を正規化
+          let endpoint = llmConfig.endpoint.trim();
+          // プロトコルが含まれていない場合は追加
+          if (!endpoint.startsWith('http')) {
+            endpoint = `https://${endpoint}`;
+            console.log(' - プロトコルを追加しました:', endpoint);
+          }
+          
+          // Azure OpenAIの設定情報を正しい形式で渡す
+          const configForLLM = {
+            endpoint: endpoint,
+            apiKey: llmConfig.apiKey,
+            deploymentName: llmConfig.deploymentName
+          };
+          
+          console.log('★ LLM処理に渡す設定:', configForLLM);
+          
           const formattedText = await processWithLocalLLM(
             extractedText, 
             promptTemplate, 
-            llmConfig.endpoint
+            configForLLM
           );
           
           setLlmResult(formattedText);

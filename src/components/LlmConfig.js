@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Form, Button, Alert, Card } from 'react-bootstrap';
-import { testLLMConnection } from '../services/llmService';
+import { testAzureOpenAIConnection } from '../services/llmService';
 
 const LlmConfig = ({ llmConfig, onConfigChange, disabled }) => {
   const [testing, setTesting] = useState(false);
@@ -15,10 +15,11 @@ const LlmConfig = ({ llmConfig, onConfigChange, disabled }) => {
   };
 
   const handleTestConnection = async () => {
-    if (!llmConfig.endpoint) {
+    // 必要な設定がすべて揃っているか確認
+    if (!llmConfig.endpoint || !llmConfig.apiKey || !llmConfig.deploymentName) {
       setTestResult({
         success: false,
-        message: 'エンドポイントを入力してください'
+        message: 'Azure OpenAIのエンドポイント、APIキー、デプロイメント名を入力してください'
       });
       return;
     }
@@ -27,13 +28,19 @@ const LlmConfig = ({ llmConfig, onConfigChange, disabled }) => {
     setTestResult(null);
 
     try {
-      const success = await testLLMConnection(llmConfig.endpoint);
+      const config = {
+        endpoint: llmConfig.endpoint,
+        apiKey: llmConfig.apiKey,
+        deploymentName: llmConfig.deploymentName
+      };
+      
+      const success = await testAzureOpenAIConnection(config);
       
       setTestResult({
         success,
         message: success 
-          ? 'ローカルLLMへの接続に成功しました' 
-          : 'ローカルLLMへの接続に失敗しました。エンドポイントを確認してください'
+          ? 'Azure OpenAI Serviceへの接続に成功しました' 
+          : 'Azure OpenAI Serviceへの接続に失敗しました。設定を確認してください'
       });
     } catch (error) {
       setTestResult({
@@ -47,45 +54,60 @@ const LlmConfig = ({ llmConfig, onConfigChange, disabled }) => {
 
   return (
     <Card className="mb-4">
-      <Card.Header as="h5">ローカルLLM設定</Card.Header>
+      <Card.Header as="h5">Azure OpenAI Service 設定</Card.Header>
       <Card.Body>
         <Form.Group className="mb-3">
-          <Form.Label>ローカルLLMエンドポイント</Form.Label>
+          <Form.Label>Azure OpenAI エンドポイント</Form.Label>
           <Form.Control
             type="text"
             name="endpoint"
-            placeholder="http://localhost:11434/api/generate"
+            placeholder="https://your-resource-name.openai.azure.com"
             value={llmConfig.endpoint || ''}
             onChange={handleChange}
             disabled={disabled}
           />
           <Form.Text className="text-muted">
-            ローカルLLM（Ollama、LM Studio等）のAPIエンドポイントを入力してください
+            Azureポータルで作成したOpenAIリソースのエンドポイントを入力してください
           </Form.Text>
         </Form.Group>
 
         <Form.Group className="mb-3">
-          <Form.Label>モデル名</Form.Label>
+          <Form.Label>Azure OpenAI APIキー</Form.Label>
           <Form.Control
-            type="text"
-            name="model"
-            placeholder="gemma"
-            value={llmConfig.model || ''}
+            type="password"
+            name="apiKey"
+            placeholder="1234..."
+            value={llmConfig.apiKey || ''}
             onChange={handleChange}
             disabled={disabled}
           />
           <Form.Text className="text-muted">
-            使用するモデル名を入力してください（例: gemma, llama3, mixtral）
+            Azure OpenAIリソースのAPIキーを入力してください
+          </Form.Text>
+        </Form.Group>
+
+        <Form.Group className="mb-3">
+          <Form.Label>デプロイメント名</Form.Label>
+          <Form.Control
+            type="text"
+            name="deploymentName"
+            placeholder="gpt-4"
+            value={llmConfig.deploymentName || ''}
+            onChange={handleChange}
+            disabled={disabled}
+          />
+          <Form.Text className="text-muted">
+            Azureポータルでデプロイしたモデルのデプロイメント名を入力してください（例: gpt-4, gpt-35-turbo）
           </Form.Text>
         </Form.Group>
 
         <Button 
           variant="secondary" 
           onClick={handleTestConnection}
-          disabled={disabled || testing || !llmConfig.endpoint}
+          disabled={disabled || testing || !llmConfig.endpoint || !llmConfig.apiKey || !llmConfig.deploymentName}
           className="mb-3"
         >
-          {testing ? '接続テスト中...' : 'LLM接続テスト'}
+          {testing ? '接続テスト中...' : 'Azure OpenAI接続テスト'}
         </Button>
 
         {testResult && (
