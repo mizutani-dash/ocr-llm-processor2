@@ -44,33 +44,18 @@ function App() {
   // Prompt template state
   const [promptTemplate, setPromptTemplate] = useState(() => {
     const savedPrompt = localStorage.getItem('promptTemplate');
-    return savedPrompt || `あなたは医療機関の事務スタッフです。以下の問診票のOCRデータを解析して、電子カルテに入力しやすい形式に整形してください。
-患者情報、症状、既往歴、アレルギー、服用薬などの重要情報を抽出し、明確に分類して表示してください。
-
-問診票データ:
-{{OCR_RESULT}}
-
-整形後のデータ形式は以下の通りです:
-【患者基本情報】
-- 氏名: 
-- 年齢: 
-- 性別: 
-- 連絡先: 
-
-【主訴・症状】
-- 
-
+    return savedPrompt || `{{OCR_RESULT}}を電子カルテにコピーできる形に整形してください。
+形式としては下記の様にまとめて、それ以外は表記しないでください。また患者の自由記載については要点だけ記載してください。また、空行は作らず、詰めて記載してください。
+【主訴】
+【現病歴】
 【既往歴】
-- 
-
-【服用中の薬剤】
-- 
-
+【通院中の医院】
+【内服薬】
 【アレルギー】
-- 
-
-【その他特記事項】
-- `;
+【喫煙歴】
+【飲酒歴】
+(もしあれば【妊娠可能性】）
+【検査についての希望】`;
   });
 
   // Save configurations to localStorage when they change
